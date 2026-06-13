@@ -1,0 +1,32 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go build cache
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# TLS certs (don't commit private keys)
+certs/
+
+# Project guide (personal reference)
+BG.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+test-dummy/
