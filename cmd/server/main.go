@@ -26,8 +26,9 @@ func main() {
 
 		client:= server.NewClient(conn,hub)
 		//so basically client writes hub forwards !!! client reads !!!
-		hub.Register(client)
-		go client.ReadPump()
+		//hub.Register(client)
 		go client.WritePump()
+		go client.ReadPump()
+		
 	}
 }

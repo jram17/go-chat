@@ -3,18 +3,22 @@ package server
 import "github.com/jram17/go-chat/internal/protocol"
 
 type Hub struct {
-	clients    map[*Client]bool
-	register   chan *Client
-	unregister chan *Client
-	broadcasts chan protocol.Envelope
+	clients      map[string]*Client
+	register     chan *Client
+	unregister   chan *Client
+	broadcasts   chan protocol.Envelope
+	privates     chan protocol.Envelope
+	keyExchanges chan *Client
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		broadcasts: make(chan protocol.Envelope),
+		clients:      make(map[string]*Client),
+		register:     make(chan *Client),
+		unregister:   make(chan *Client),
+		broadcasts:   make(chan protocol.Envelope),
+		privates:     make(chan protocol.Envelope),
+		keyExchanges: make(chan *Client),
 	}
 }
 func (h *Hub) Register(client *Client) {
@@ -26,28 +30,64 @@ func (h *Hub) Unregister(client *Client) {
 func (h *Hub) Broadcast(env protocol.Envelope) {
 	h.broadcasts <- env
 }
+func (h *Hub) SendPrivates(env protocol.Envelope) {
+	h.privates <- env
+}
+func (h *Hub) HandleKeyExchange(client *Client) {
+	h.keyExchanges <- client
+}
 
 func (h *Hub) Run() {
 	for {
 		select {
-		case client := <-h.register:
-			h.clients[client] = true
+		case client := <-h.keyExchanges:
+			// Send all existing keys to the new client
+			for _, existing := range h.clients {
+				if existing.username == client.username {
+					continue
+				}
+				if existing.publicKey == nil {
+					continue
+				}
+				client.send <- protocol.Envelope{
+					Type:    protocol.MessageTypeKeyExchange,
+					From:    existing.username,
+					Payload: existing.publicKey,
+				}
+			}
+			// Broadcast new client's key to everyone else
+			for _, existing := range h.clients {
+				if existing.username == client.username {
+					continue
+				}
+				existing.send <- protocol.Envelope{
+					Type:    protocol.MessageTypeKeyExchange,
+					From:    client.username,
+					Payload: client.publicKey,
+				}
+			}
+
+		case env := <-h.privates:
+			recipient, ok := h.clients[env.To]
+			if ok {
+				recipient.send <- env
+			}
+
 		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
+			if _, ok := h.clients[client.username]; ok {
+				delete(h.clients, client.username)
 				close(client.send)
 			}
+
 		case message := <-h.broadcasts:
-			for client := range h.clients {
+			for _, client := range h.clients {
 				select {
 				case client.send <- message:
 				default:
-					//slow/ dead clients - drop them
-					delete(h.clients, client)
+					delete(h.clients, client.username)
 					close(client.send)
 				}
 			}
 		}
 	}
-
 }
