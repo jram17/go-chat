@@ -2,8 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -14,7 +14,16 @@ import (
 
 func main() {
 
-	conn, err := net.Dial("tcp", "localhost:9000")
+	// making it tls!!!
+
+	config := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	conn, err := tls.Dial(
+		"tcp",
+		"localhost:9000",
+		config,
+	)
 	if err != nil {
 		panic(err)
 	}

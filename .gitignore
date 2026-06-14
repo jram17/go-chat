@@ -20,6 +20,7 @@ bin/
 
 # TLS certs (don't commit private keys)
 certs/
+cmd/gen-cert/certs/
 
 # Project guide (personal reference)
 BG.md
