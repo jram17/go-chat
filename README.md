@@ -2,6 +2,8 @@
 
 A **real-time terminal chat application** built from scratch in Go, featuring true **End-to-End Encryption**. Every private message is encrypted on the sender's device using X25519 key exchange and AES-256-GCM, meaning the server is cryptographically unable to read message content — it only **routes** ciphertext between peers.
 
+![Demo](assets/demo.gif)
+
 The project implements a custom length-prefixed protocol over TLS, a goroutine-per-connection server with channel-based message routing, and a polished terminal UI built with Bubbletea. No third-party crypto dependencies — only the Go standard library and `x/crypto`.
 
 ## Features
