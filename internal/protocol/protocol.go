@@ -14,6 +14,7 @@ const (
 	MessageTypeKeyExchange
 	MessageTypePrivate
 	MessageTypeUserList
+	MessageTypeTyping
 )
 
 type Envelope struct {

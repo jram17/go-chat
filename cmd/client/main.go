@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -14,20 +15,33 @@ import (
 )
 
 func main() {
+	addr := flag.String("addr", "localhost:9000", "server address (host:port)")
+	name := flag.String("name", "", "username (prompted if not provided)")
+	flag.Parse()
+
 	config := &tls.Config{
 		InsecureSkipVerify: true,
 	}
-	conn, err := tls.Dial("tcp", "localhost:9000", config)
+	conn, err := tls.Dial("tcp", *addr, config)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Failed to connect to %s: %v\n", *addr, err)
+		os.Exit(1)
 	}
 	defer conn.Close()
 
-	// Get username before starting TUI
-	fmt.Print("Enter your name: ")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	username := scanner.Text()
+	// Get username
+	username := *name
+	if username == "" {
+		fmt.Print("Enter your name: ")
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Scan()
+		username = scanner.Text()
+	}
+
+	if username == "" {
+		fmt.Fprintln(os.Stderr, "Username cannot be empty")
+		os.Exit(1)
+	}
 
 	// Send join
 	join := protocol.Envelope{
@@ -37,14 +51,16 @@ func main() {
 	}
 	encoded, err := protocol.Encode(join)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Encoding error: %v\n", err)
+		os.Exit(1)
 	}
 	conn.Write(encoded)
 
 	// Generate keys and send key exchange
 	privateKey, pub, err := crypto.GenerateKeyPair()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Key generation failed: %v\n", err)
+		os.Exit(1)
 	}
 	keyEnv := protocol.Envelope{
 		Type:      protocol.MessageTypeKeyExchange,
@@ -54,7 +70,8 @@ func main() {
 	}
 	encoded, err = protocol.Encode(keyEnv)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Encoding error: %v\n", err)
+		os.Exit(1)
 	}
 	conn.Write(encoded)
 
@@ -79,7 +96,7 @@ func main() {
 	}()
 
 	if _, err := p.Run(); err != nil {
-		fmt.Println("Error running TUI:", err)
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
 }

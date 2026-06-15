@@ -2,12 +2,14 @@ package server
 
 import (
 	"bufio"
-	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
 	"github.com/jram17/go-chat/internal/protocol"
 )
+
+const maxMessageSize = 65536 // 64KB
 
 type Client struct {
 	conn      net.Conn
@@ -15,14 +17,15 @@ type Client struct {
 	hub       *Hub
 	username  string
 	publicKey []byte
+	logger    *slog.Logger
 }
 
-func NewClient(conn net.Conn, hub *Hub) *Client {
+func NewClient(conn net.Conn, hub *Hub, logger *slog.Logger) *Client {
 	return &Client{
-		conn:     conn,
-		send:     make(chan protocol.Envelope, 256),
-		hub:      hub,
-		username: "",
+		conn:   conn,
+		send:   make(chan protocol.Envelope, 256),
+		hub:    hub,
+		logger: logger,
 	}
 }
 
@@ -43,9 +46,16 @@ func (c *Client) ReadPump() {
 	for {
 		env, err := protocol.Decode(reader)
 		if err != nil {
-			fmt.Println("client disconnected:", c.conn.RemoteAddr())
+			c.logger.Info("client disconnected", "addr", c.conn.RemoteAddr(), "username", c.username)
 			return
 		}
+
+		// Validate message size
+		if len(env.Payload) > maxMessageSize {
+			c.logger.Warn("message too large, dropping", "username", c.username, "size", len(env.Payload))
+			continue
+		}
+
 		switch env.Type {
 		case protocol.MessageTypeJoin:
 			if c.username != "" {
@@ -53,6 +63,7 @@ func (c *Client) ReadPump() {
 			}
 			c.username = env.From
 			c.hub.clients[c.username] = c
+			c.logger.Info("client joined", "username", c.username, "addr", c.conn.RemoteAddr())
 			c.hub.Broadcast(protocol.Envelope{
 				Type:      protocol.MessageTypeJoin,
 				From:      c.username,
@@ -73,8 +84,15 @@ func (c *Client) ReadPump() {
 			env.Timestamp = time.Now().Unix()
 			c.hub.SendPrivates(env)
 
+		case protocol.MessageTypeTyping:
+			env.From = c.username
+			c.hub.SendPrivates(env)
+
+		case protocol.MessageTypeUserList:
+			c.hub.RequestUserList(c)
+
 		default:
-			fmt.Println("unknown message type:", env.Type)
+			c.logger.Warn("unknown message type", "type", env.Type, "username", c.username)
 		}
 	}
 }
@@ -84,11 +102,12 @@ func (c *Client) WritePump() {
 	for message := range c.send {
 		encoded, err := protocol.Encode(message)
 		if err != nil {
-			fmt.Println("encoding error:", err)
+			c.logger.Error("encoding error", "err", err, "username", c.username)
+			continue
 		}
 		_, err = c.conn.Write(encoded)
 		if err != nil {
-			fmt.Println("write err:", c.conn.RemoteAddr())
+			c.logger.Info("write error, disconnecting", "addr", c.conn.RemoteAddr(), "username", c.username)
 			return
 		}
 	}

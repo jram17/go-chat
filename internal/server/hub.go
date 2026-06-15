@@ -1,6 +1,12 @@
 package server
 
-import "github.com/jram17/go-chat/internal/protocol"
+import (
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/jram17/go-chat/internal/protocol"
+)
 
 type Hub struct {
 	clients      map[string]*Client
@@ -9,9 +15,11 @@ type Hub struct {
 	broadcasts   chan protocol.Envelope
 	privates     chan protocol.Envelope
 	keyExchanges chan *Client
+	userList     chan *Client
+	logger       *slog.Logger
 }
 
-func NewHub() *Hub {
+func NewHub(logger *slog.Logger) *Hub {
 	return &Hub{
 		clients:      make(map[string]*Client),
 		register:     make(chan *Client),
@@ -19,8 +27,11 @@ func NewHub() *Hub {
 		broadcasts:   make(chan protocol.Envelope),
 		privates:     make(chan protocol.Envelope),
 		keyExchanges: make(chan *Client),
+		userList:     make(chan *Client),
+		logger:       logger,
 	}
 }
+
 func (h *Hub) Register(client *Client) {
 	h.register <- client
 }
@@ -36,12 +47,26 @@ func (h *Hub) SendPrivates(env protocol.Envelope) {
 func (h *Hub) HandleKeyExchange(client *Client) {
 	h.keyExchanges <- client
 }
+func (h *Hub) RequestUserList(client *Client) {
+	h.userList <- client
+}
 
 func (h *Hub) Run() {
 	for {
 		select {
+		case client := <-h.userList:
+			usernames := make([]string, 0, len(h.clients))
+			for name := range h.clients {
+				usernames = append(usernames, name)
+			}
+			client.send <- protocol.Envelope{
+				Type:      protocol.MessageTypeUserList,
+				From:      "server",
+				Payload:   []byte(strings.Join(usernames, ",")),
+				Timestamp: time.Now().Unix(),
+			}
+
 		case client := <-h.keyExchanges:
-			// Send all existing keys to the new client
 			for _, existing := range h.clients {
 				if existing.username == client.username {
 					continue
@@ -55,7 +80,6 @@ func (h *Hub) Run() {
 					Payload: existing.publicKey,
 				}
 			}
-			// Broadcast new client's key to everyone else
 			for _, existing := range h.clients {
 				if existing.username == client.username {
 					continue
@@ -71,10 +95,13 @@ func (h *Hub) Run() {
 			recipient, ok := h.clients[env.To]
 			if ok {
 				recipient.send <- env
+			} else {
+				h.logger.Warn("private message recipient not found", "to", env.To, "from", env.From)
 			}
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client.username]; ok {
+				h.logger.Info("client unregistered", "username", client.username)
 				delete(h.clients, client.username)
 				close(client.send)
 			}
@@ -84,6 +111,7 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- message:
 				default:
+					h.logger.Warn("dropping slow client", "username", client.username)
 					delete(h.clients, client.username)
 					close(client.send)
 				}
